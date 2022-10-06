@@ -8,14 +8,15 @@ Created on Wed Jun  1 06:39:21 2022
 
 from gemini3d.grid.convert import unitvecs_geographic
 import numpy as np
-from lompe.secsy import cubedsphere
+# from lompe.secsy import cubedsphere
 from lompe.data_tools.dataloader import getbearing
 import great_circle_calculator.great_circle_calculator as gcc
 import xarray as xr
 from gemini3d.grid.gridmodeldata import model2geogcoords
 import pandas as pd
-from lompe.secsy.secsy import utils as secsy
-
+# from lompe.secsy.secsy import utils as secsy
+from secsy.secsy import utils as secsy
+from secsy import cubedsphere
 
 ######
 #Contain helper functions needed in the 3D SECS representation
@@ -104,24 +105,23 @@ def make_csgrid(xg, height = 500, crop_factor = 0.6, resolution_factor = 0.5,
     orientation = np.degrees(getbearing(np.array([x0[0]]), np.array([x0[1]]), np.array([x1[0]]), np.array([x1[1]])))
     
     #Centre location of CS grid
-    position = (xg['glon'][ii,dims[1]//4,dims[2]//2], xg['glat'][ii,(dims[1]//4),dims[2]//2]) #Added the -10 hack (or //4)
+    position = (xg['glon'][ii,dims[1]//6,dims[2]//2], xg['glat'][ii,(dims[1]//6),dims[2]//2]) #Added the -10 hack (or //4)
 
     #Dimensions of CS grid
     p0 = (xg['glon'][ii,0,dims[2]//2],xg['glat'][ii,0,dims[2]//2])
     p1 = (xg['glon'][ii,-1,dims[2]//2],xg['glat'][ii,-1,dims[2]//2])
     d2 = gcc.distance_between_points(p0, p1) #distance in dimension 2 (magntic northsouth ish)
     L = d2 * crop_factor
-    Lres = d2/dims[1] / resolution_factor
+    Lres = d2/dims[1] / resolution_factor # For secs grid (grid)
     p0 = (xg['glon'][ii,dims[1]//2,0],xg['glat'][ii,dims[1]//2,0])
     p1 = (xg['glon'][ii,dims[1]//2,-1],xg['glat'][ii,dims[1]//2,-1])    
     d3 = gcc.distance_between_points(p0, p1) #distance in dimension 3 (magntic east ish)
     W = d3 * crop_factor
-    Wres = d3/dims[2] / resolution_factor
+    Wres = d3/dims[2] / resolution_factor # For secs grid (grid)
 
     #Make CS grid object
-    grid_ev = cubedsphere.CSgrid(cubedsphere.CSprojection(position, -orientation[0]), L, W, Lres, Wres, R = (RE+height)*1e3) #inner grid, to evaluate on
-    # extend = 3 #How many extra secs poles on each side to pad with
-    
+    grid_ev = cubedsphere.CSgrid(cubedsphere.CSprojection(position, -orientation[0]), 
+                L, W, Lres, Wres, R = (RE+height)*1e3) #inner grid, to evaluate on    
     xi_e  = np.hstack((grid_ev.xi_mesh[0,0]-np.flip([i*grid_ev.dxi for i in range(1,extend)]), grid_ev.xi_mesh[0], grid_ev.xi_mesh[0,-1] + np.array([i*grid_ev.dxi for i in range(1,extend+1)]) )) - grid_ev.dxi /2 
     eta_e = np.hstack((grid_ev.eta_mesh[0,0]-np.flip([i*grid_ev.deta for i in range(1,extend)]), grid_ev.eta_mesh[:, 0], grid_ev.eta_mesh[-1,   0] + np.array([i*grid_ev.deta for i in range(1,extend+1)]) )) - grid_ev.deta/2 
     grid = cubedsphere.CSgrid(cubedsphere.CSprojection(grid_ev.projection.position,
@@ -345,7 +345,7 @@ def grid_param_at_alt(datadict, grid, param='v'):
     Parameters
     ----------
     datadict : dictionary
-        The GEMINI output in ENU components at specific altitude.
+        The GEMINI output in ENU components (in 3D).
     grid : CS grid object
         The field-aligned CS grid, defined at the top boundary. Should be the 
         evaluation grid (grid_ev object made with the function above in this 
@@ -356,32 +356,43 @@ def grid_param_at_alt(datadict, grid, param='v'):
     Returns
     -------
     Tuple containing the ENU components of the param from model 
-    output, gridded on the CS grid.
+    output, gridded on the CS grid. Each component is a 3D array.
 
     """
-    
-    use = np.isfinite(datadict['ju'].flatten()) & grid.ingrid(datadict['glonmesh'].flatten(),
-                    datadict['glatmesh'].flatten()) 
-    ii, jj = grid.bin_index(datadict['glonmesh'].flatten()[use],datadict['glatmesh'].flatten()[use])
-    ii1d = grid._index(ii, jj)
+    alts_ = datadict['altmesh'][:,0,0]
+    use = np.isfinite(datadict['ju'][0,:,:].flatten()) & grid.ingrid(datadict['glonmesh'][0,:,:].flatten(),
+                datadict['glatmesh'][0,:,:].flatten())
     if param == 'n':
-        df = pd.DataFrame({'i1d':ii1d, 'i':ii, 'j':jj, 'n': datadict['n'].flatten()[use]})
+        p = []
     else:
-        df = pd.DataFrame({'i1d':ii1d, 'i':ii, 'j':jj, param+'e': datadict[param+'e'].flatten()[use], 
-                           param+'n': datadict[param+'n'].flatten()[use], 
-                           param+'u': datadict[param+'u'].flatten()[use]})        
-    gdf = df.groupby('i1d').mean()
-    df_sorted = gdf.reindex(index=pd.Series(np.arange(0,len(grid.lon.flatten()))), method='nearest', tolerance=0.1)
-    
-    if param == 'n':
-        p = df_sorted[param].values.reshape(grid.shape)
-        return p
-    else:
-        pe = df_sorted[param+'e'].values.reshape(grid.shape)
-        pn = df_sorted[param+'n'].values.reshape(grid.shape)
-        pu = df_sorted[param+'u'].values.reshape(grid.shape)
+        pe = []
+        pn = []
+        pu = []
+
+    for (i,alt) in enumerate(alts_):
+        ii, jj = grid.bin_index(datadict['glonmesh'][i,:,:].flatten()[use],datadict['glatmesh'][i,:,:].flatten()[use])
+        ii1d = grid._index(ii, jj)
+        if param == 'n':
+            df = pd.DataFrame({'i1d':ii1d, 'i':ii, 'j':jj, 'n': datadict['n'].flatten()[use]})
+        else:
+            df = pd.DataFrame({'i1d':ii1d, 'i':ii, 'j':jj, 
+                               param+'e': datadict[param+'e'][i,:,:].flatten()[use], 
+                               param+'n': datadict[param+'n'][i,:,:].flatten()[use], 
+                               param+'u': datadict[param+'u'][i,:,:].flatten()[use]})        
+        gdf = df.groupby('i1d').mean()
+        df_sorted = gdf.reindex(index=pd.Series(np.arange(0,len(grid.lon.flatten()))), method='nearest', tolerance=0.1)
         
-        return (pe,pn, pu)
+        if param == 'n':
+            p.append(df_sorted[param].values.reshape(grid.shape))
+        else:
+            pe.append(df_sorted[param+'e'].values.reshape(grid.shape))
+            pn.append(df_sorted[param+'n'].values.reshape(grid.shape))
+            pu.append(df_sorted[param+'u'].values.reshape(grid.shape))
+        
+    if param == 'n':
+        return np.array(p)
+    else:
+        return (np.array(pe),np.array(pn), np.array(pu))
     
 def divergence(xg, dat, param = 'j_perp'):
     """
@@ -504,7 +515,8 @@ def divergence_spherical(sampledict, param = ['je','jn'], alt = None):
         return d1 + d2
 
 def get_SECS_J_G_matrices_3D(secs_grid, alts_grid, lat, lon, alt, constant = 
-                             1./(4.*np.pi), singularity_limit=None):
+                             1./(4.*np.pi), singularity_limit=None, 
+                             interpolate=False):
     ''' 
 
         Calculate SECS J_G matrices for 3D representation using CS grid at fixed
@@ -536,6 +548,19 @@ def get_SECS_J_G_matrices_3D(secs_grid, alts_grid, lat, lon, alt, constant =
         Passed to the underlying secsy function. The default is 0. [m] meaning
         that the modified SECS functions are not used. Typically ~half a CS grid 
         cell is used. Default (None) will use 0.5*grid.Lres
+    interpolate : Boolean, optional
+        If True: Each row in G (observation/evaloation, N)
+        will affect the two closest layers of SECS nodes (above and below its 
+        location). Its vertical placement reflect the relative weight of the 
+        influence of each layer. S matrix should be constructed with the same
+        option. Default is False
+    TODO:
+    interpolation : Boolean, optional
+        If True: Each row in G (observation/evaloation, N)
+        will affect the two closest layers of SECS nodes (above and below its 
+        location). Its vertical placement reflect the relative weight of the 
+        influence of each layer. S matrix should be constructed with the same
+        option.
 
     Returns
     -------
@@ -560,8 +585,8 @@ def get_SECS_J_G_matrices_3D(secs_grid, alts_grid, lat, lon, alt, constant =
     alt = alt.flatten()[use]
     
     # Remove data/evaluation points outside grid in vertical direction
-    k0 = get_alt_index(alts_grid, alt)
-    inside = k0 != -1
+    k0 = get_alt_index(alts_grid, alt, returnfloat=True)
+    inside = (k0 >= 0) & (k0<alts_grid.size-1)
     lat = lat.flatten()[inside]
     lon = lon.flatten()[inside]
     alt = alt.flatten()[inside]     
@@ -572,7 +597,8 @@ def get_SECS_J_G_matrices_3D(secs_grid, alts_grid, lat, lon, alt, constant =
     J = secs_grid.shape[1]  #Number of cells in xi direction  
     IJK = I*J*K
     N = lat.shape[0] # Number of data/evaluation points  
-           
+
+      
     #Compute SECS matrices at bottom layer, using all observational locations (N). 
     # We will apply the singularity threshold
     # defined as a length on the bottom layer, and use the same corresponding
@@ -593,18 +619,59 @@ def get_SECS_J_G_matrices_3D(secs_grid, alts_grid, lat, lon, alt, constant =
                 singularity_limit=singularity_limit)
     
     #Indices of each evaluation point in 3D
-    k, i, j = get_indices_kij(secs_grid, alts_grid, lat, lon, alt)  
+    k, i, j = get_indices_kij(secs_grid, alts_grid, lat, lon, alt, 
+                              returnfloat=interpolate)  
     # kij = np.ravel_multi_index((k,i,j), (K,I,J)) #flattened index
 
+    
+    if interpolate:
+        k_under = np.floor(k).astype(int)
+        k_over = np.ceil(k).astype(int)
+        same = k_over == k_under
+        k_over[same] = k_over[same] + 1
+        overthetop = k_over >= len(alts_grid)
+        k_over[overthetop] = len(alts_grid)-1
+        kij_start_under = np.ravel_multi_index((k_under, 
+                                                np.zeros(len(k)).astype(int),
+                                                np.zeros(len(k)).astype(int)), 
+                                                (K,I,J)) #flattened
+        kij_stop_under = kij_start_under + I*J
+        kij_start_over = np.ravel_multi_index((k_over, 
+                                                np.zeros(len(k)).astype(int),
+                                                np.zeros(len(k)).astype(int)), 
+                                                (K,I,J)) #flattened
+        kij_stop_over = kij_start_over + I*J
+        k_frac = k-np.round(k).astype(int)
+        negs = k_frac<0
+        w_under = np.zeros(len(k))
+        w_under[negs] = -k_frac[negs]
+        poss = k_frac>=0
+        w_under[poss] = -k_frac[poss]+1
+        w_over = np.zeros(len(k))
+        w_over[negs] = k_frac[negs]+1
+        w_over[poss] = k_frac[poss]
+
+    #Do the altitude correction
     altmask = np.zeros(IJK)
     altmask = []
-    r_ = (RE + alt_)/(RE + alts_grid) #Altitude correction factors
+    r_ = (RE + alt_)/(RE + alts_grid) #Altitude correction factors        
     for kkk in range(N):
         mask_ = np.zeros(IJK)
-        kij_start = np.ravel_multi_index((k[kkk],0,0), (K,I,J)) #flattened index
-        kij_stop = kij_start + I*J
-        mask_[kij_start:kij_stop] = 1 * r_[k[kkk]]
+        if interpolate:
+            # kij_start_under = np.ravel_multi_index((k_under[kkk],0,0), (K,I,J)) #flattened
+            # kij_stop_under = kij_start_under + I*J
+            mask_[kij_start_under[kkk]:kij_stop_under[kkk]] = w_under[kkk] * r_[k_under[kkk]]
+            # kij_start_over = np.ravel_multi_index((k_over[kkk],0,0), (K,I,J)) #flattened
+            # kij_stop_over = kij_start_over + I*J     
+            if not overthetop[kkk]:
+                mask_[kij_start_over[kkk]:kij_stop_over[kkk]] = w_over[kkk] * r_[k_over[kkk]]
+            
+        else:
+            kij_start = np.ravel_multi_index((k[kkk],0,0), (K,I,J)) #flattened
+            kij_stop = kij_start + I*J
+            mask_[kij_start:kij_stop] = 1 * r_[k[kkk]]
         altmask.append(mask_)
+        
     altmask = np.array(altmask)
 
     #Make stacked SECS G matrices, not corrected for altitude nor vertical 
@@ -618,6 +685,7 @@ def get_SECS_J_G_matrices_3D(secs_grid, alts_grid, lat, lon, alt, constant =
     Gn_cf = Gn_cf_k * altmask
     Ge_df = Ge_df_k * altmask
     Gn_df = Gn_df_k * altmask
+                        
     
     
     # #Kalles broadcasting way
@@ -650,17 +718,21 @@ def get_SECS_J_G_matrices_3D(secs_grid, alts_grid, lat, lon, alt, constant =
 
 
 
-def get_alt_index(alts_grid, alt):
+def get_alt_index(alts_grid, alt, returnfloat=False):
     """
 
     Parameters
     ----------
     alts_grid : array-like, 1D or 2D
-        Altitude grid to use together with secs_grid. Length is K. Values represent the height in km of the centre of the
+        Altitude grid to use together with secs_grid. Length is K. Values 
+        represent the height in km of the centre of the
         voxels of each layer. Should be in increasing order.
     alt : array-like, 1D or 2D
         altitude [km] of the data/evaluation locations. Flattened to 1D of 
         length N
+    returnfloat : Boolean
+        If one wants to know how close it is to a neighboring layer. Default is
+        False
     Returns
     -------
     Array of length N of the index in vertical direction of each altitude in 
@@ -674,10 +746,16 @@ def get_alt_index(alts_grid, alt):
     k = (np.digitize(alt, edges) - 1)
     overthetop = k == alts_grid.shape[0]
     k[overthetop] = -1
+    
+    if returnfloat:
+        use = k != -1
+        res_ = (alt[use] - alts_grid[k[use]])/(2*altres[k[use]])
+        k = k.astype(float)
+        k[use] = k[use] + res_
 
     return k    
     
-def get_indices_kij(secs_grid, alts_grid, lat, lon, alt):
+def get_indices_kij(secs_grid, alts_grid, lat, lon, alt, returnfloat=False):
     """
 
     Parameters
@@ -690,13 +768,15 @@ def get_indices_kij(secs_grid, alts_grid, lat, lon, alt):
         voxels of each layer. Should be in increasing order.
     lat : array-like, 1D or 2D
        latitudes [deg] of the data/evaluation locations. Length N when 
-       flattened to 1D
+       flattened to 1D. Must be inside secs_grid (not checked).
     lon : array-like, 1D or 2D
        longitudes [deg] of the data/evaluation locations. Length N when 
-       flattened to 1D
+       flattened to 1D. Must be inside secs_grid (not checked).
     alt : array-like, 1D or 2D
         altitude [km] of the data/evaluation locations. Length N when 
-        flattened to 1D
+        flattened to 1D.
+    returnfloat : boolean, optional
+        return the exact index of the input location. Defailt is False.
     Returns
     -------
     Tuple of indices (k,i,j). k is index in altitude, i is index in CS eta 
@@ -710,22 +790,28 @@ def get_indices_kij(secs_grid, alts_grid, lat, lon, alt):
         print (1/0)
     
     binnumber = secs_grid.bin_index(lon, lat)
-    k = get_alt_index(alts_grid, alt).flatten()
+    k = get_alt_index(alts_grid, alt, returnfloat=returnfloat).flatten()
+    
     i = binnumber[0].flatten()
     j = binnumber[1].flatten()
-    return (k, i, j)
+    if returnfloat:
+        xi_obs, eta_obs = secs_grid.projection.geo2cube(lon, lat)
+        xi_grid = secs_grid.xi[i,j]
+        eta_grid = secs_grid.eta[i,j]
+        i_frac = (eta_obs-eta_grid)/secs_grid.deta
+        j_frac = (xi_obs-xi_grid)/secs_grid.dxi
+        return (k, i+i_frac, j+j_frac)    
+    else:
+        return (k, i, j)
 
     
 def get_flattened_index_from_ijk(secs_grid, alts_grid, i, j, k):
     return  np.ravel_multi_index((k, i, j), (alts_grid.size, secs_grid.NL, secs_grid.NW)).flatten() #Same as in CS class
     
     
-def get_jr_matrix(secs_grid, alts_grid, lat, lon, alt):
+def get_jr_matrix(secs_grid, alts_grid, lat, lon, alt, interpolate=None):
     """
 
-    TODO: Add the thickness of SECS layer, such that solution amplitudes has 
-            units of A/m, i.e. reflect the sheet current density, and SECS representation
-            therefore describe volume current density A/m2
 
     Parameters
     ----------
@@ -743,7 +829,19 @@ def get_jr_matrix(secs_grid, alts_grid, lat, lon, alt):
        length N
     alt : array-like, 1D or 2D
         altitude [km] of the data/evaluation locations. Flattened to 1D of 
-        length N
+        length N. Need to be within the range specified by alts_grid. Points 
+        outside will be removed.
+    highres : Boolean, optional
+        Specifies whether to take into account the vertical placement of the
+        data/evaluation location, and distribute the effect of the data into
+        two layers: The layer it falls within, and the closest one. 
+        Default is False
+    interpolate : Boolean, optional
+        Affect two things if True: 1) Vertical location of observation/evaluation
+        location is implemented as a weighted contribution of the above and below
+        node in the construction of S. 2) When making S, the closest
+        four grid cells (in each layer) are considered, weighted by their 
+        distance to the location in question (n). Default is False.
     Returns
     -------
     Tuple of indices (i,j,k). i is index in CS eta direction, j is index in 
@@ -757,8 +855,8 @@ def get_jr_matrix(secs_grid, alts_grid, lat, lon, alt):
     alt = alt.flatten()[use]
 
     # Remove data/evaluation points outside grid in vertical direction
-    k0 = get_alt_index(alts_grid, alt)
-    inside = k0 != -1
+    k0 = get_alt_index(alts_grid, alt, returnfloat=True)
+    inside = (k0 >= 0) & (k0<alts_grid.size-1)
     lat = lat.flatten()[inside]
     lon = lon.flatten()[inside]
     alt = alt.flatten()[inside]  
@@ -773,7 +871,7 @@ def get_jr_matrix(secs_grid, alts_grid, lat, lon, alt):
     I = secs_grid.shape[0]
     J = secs_grid.shape[1]
     K = alts_grid.shape[0]
-    IJK = I*J*K
+    KIJ = K*I*J
     
     #Vertical resolution
     altres = np.diff(alts_grid)
@@ -786,24 +884,167 @@ def get_jr_matrix(secs_grid, alts_grid, lat, lon, alt):
     # A = (A0.reshape((N, -1, I*J)))# / r.reshape((-1, r1d.size, phi1d.size * theta1d.size))).reshape(N, r.size)    
     # Ge = (Ge.reshape((N, -1, phi1d.size * theta1d.size)) / r.reshape((-1, r1d.size, phi1d.size * theta1d.size))).reshape(N, r.size)        
 
-    #Indices of each evaluation point in 3D
-    k, i, j = get_indices_kij(secs_grid, alts_grid, lat, lon, alt)
 
+    #Indices of each evaluation point in 3D
+    k, i, j = get_indices_kij(secs_grid, alts_grid, lat, lon, alt, 
+                              returnfloat=interpolate)
     # Corresponding flattened index    
-    kij = np.ravel_multi_index((k,i,j), (K,I,J)) #flattened index
+    kij = np.ravel_multi_index((np.round(k).astype(int),np.round(i).astype(int),
+                                np.round(j).astype(int)), (K,I,J)) #flattened index
     
-    # Make the vertical integration matrix S. S is very sparse. Should take advantage if that.
-    S = np.zeros((N, IJK))
-    for (counter,idx) in enumerate(kij): #each evaluation/data point        
-        temp = np.zeros(IJK)
-        k_n = np.arange(0, k[counter]+1)
-        alt_n = alts_grid[0:k[counter]+1]
-        i_n = np.ones(k[counter]+1).astype(int)*i[counter]
-        j_n = np.ones(k[counter]+1).astype(int)*j[counter]
-        fill =  np.ravel_multi_index((k_n, i_n, j_n), (K, I, J)) #flattened index   
-        dr = altres[k_n] * 1e3 #altitude range of layer in m
-        temp[fill] = dr/(A0[i[counter],j[counter]] * (alt_n+RE)/(alt_n[0]+RE))
+    # Make the vertical integration matrix S. S is very sparse. TO BE IMPLEMENTED
+    S = np.zeros((N, KIJ))
+    for (counter,idx) in enumerate(kij): #each evaluation/data point  
+        # print(counter)#k[counter], i[counter], j[counter])      
+        temp = np.zeros(KIJ)
+        if interpolate:
+            k_n = np.arange(0, np.ceil(k[counter])+1).astype(int)
+            if k[counter] % 1 == 0: #add above layer, but set to 0 weight
+                k_n = np.hstack((k_n,k_n[-1]+1))
+            ks = k_n.size
+            alt_n = alts_grid[0:np.floor(k[counter]).astype(int)+2]            
+            if (i[counter]<=1) | (i[counter]>=I-1) | (j[counter]<=1) | (j[counter]>=J-1):
+                # Do not interpolate horizontally on points close to edge
+                i_n = np.ones(k_n.size).astype(int)*np.round(i[counter]).astype(int)
+                j_n = np.ones(k_n.size).astype(int)*np.round(j[counter]).astype(int)
+                fill =  np.ravel_multi_index((k_n, i_n, j_n), (K, I, J)) #flattened index   
+                dr = altres[k_n] * 1e3 #altitude range of layer in m
+                temp[fill] = -dr/(A0[i_n,j_n] * (alt_n+RE)/(alt_n[0]+RE))
+                #negative sign due to the sign convention of amplituded and FAC defined by Amm                
+            else: #Point is in interior             
+                # Identify the four neighboring secs nodes.
+                xi1 = secs_grid.xi[np.floor(i[counter]).astype(int),
+                                   np.floor(j[counter]).astype(int)]
+                eta1 = secs_grid.eta[np.floor(i[counter]).astype(int),
+                                   np.floor(j[counter]).astype(int)]            
+                xi2 = secs_grid.xi[np.ceil(i[counter]).astype(int),
+                                   np.floor(j[counter]).astype(int)]
+                eta2 = secs_grid.eta[np.ceil(i[counter]).astype(int),
+                                   np.floor(j[counter]).astype(int)]                        
+                xi3 = secs_grid.xi[np.ceil(i[counter]).astype(int),
+                                   np.ceil(j[counter]).astype(int)]
+                eta3 = secs_grid.eta[np.ceil(i[counter]).astype(int),
+                                   np.ceil(j[counter]).astype(int)]                        
+                xi4 = secs_grid.xi[np.floor(i[counter]).astype(int),
+                                   np.ceil(j[counter]).astype(int)]
+                eta4 = secs_grid.eta[np.floor(i[counter]).astype(int),
+                                   np.ceil(j[counter]).astype(int)]
+                xi_obs, eta_obs = secs_grid.projection.geo2cube(lon[counter], lat[counter])
+                d1 = np.sqrt((xi_obs-xi1)**2 + (eta_obs-eta1)**2)
+                d2 = np.sqrt((xi_obs-xi2)**2 + (eta_obs-eta2)**2)
+                d3 = np.sqrt((xi_obs-xi3)**2 + (eta_obs-eta3)**2)
+                d4 = np.sqrt((xi_obs-xi4)**2 + (eta_obs-eta4)**2)
+                maxd = np.max(np.array([d1,d2,d3,d4]))
+                w1 = maxd/d1
+                w2 = maxd/d2
+                w3 = maxd/d3
+                w4 = maxd/d4
+                wsum = w1+w2+w3+w4
+                w1 = w1/wsum
+                w2 = w2/wsum
+                w3 = w3/wsum
+                w4 = w4/wsum
+                wij = np.hstack((np.tile(w1,ks),np.tile(w2,ks),np.tile(w3,ks),np.tile(w4,ks)))
+                
+                #Where to fill in temp array for this observation/evaluation location
+                #Here all layers are treated the same way, just scaled with area
+                k_ns = np.tile(k_n,4) 
+                i_ns = np.hstack((np.ones(k_n.size).astype(int)*np.floor(i[counter]).astype(int),
+                                np.ones(k_n.size).astype(int)*np.ceil(i[counter]).astype(int),
+                                np.ones(k_n.size).astype(int)*np.ceil(i[counter]).astype(int),
+                                np.ones(k_n.size).astype(int)*np.floor(i[counter]).astype(int)))
+                j_ns = np.hstack((np.ones(k_n.size).astype(int)*np.floor(j[counter]).astype(int),
+                                np.ones(k_n.size).astype(int)*np.floor(j[counter]).astype(int),
+                                np.ones(k_n.size).astype(int)*np.ceil(j[counter]).astype(int),
+                                np.ones(k_n.size).astype(int)*np.ceil(j[counter]).astype(int)))       
+                fill =  np.ravel_multi_index((k_ns, i_ns, j_ns), (K, I, J)) #flattened index   
+                dr = np.tile(altres[k_n],4) * 1e3 #altitude range of layer in m
+                temp[fill] = -dr*wij/(A0[i_ns,j_ns] * (np.tile(alt_n,4)+RE)/(alt_n[0]+RE))            
+                #negative sign due to the sign convention of amplituded and FAC defined by Amm
+    
+            #Apply the linear interpolation scheme in vertical direction
+            k_frac = k[counter] % 1
+            w_over = k_frac
+            w_under = 1 - w_over
+            temp[fill[-2*4:][0::2]] = temp[fill[-2*4:][0::2]] * w_under
+            temp[fill[-2*4:][1::2]] = temp[fill[-2*4:][1::2]] * w_over           
+
+        else:
+            k_n = np.arange(0, k[counter]+1)
+            alt_n = alts_grid[0:np.floor(k[counter]).astype(int)+1]
+            i_n = np.ones(k_n.size).astype(int)*np.round(i[counter]).astype(int)
+            j_n = np.ones(k_n.size).astype(int)*np.round(j[counter]).astype(int)
+            fill =  np.ravel_multi_index((k_n, i_n, j_n), (K, I, J)) #flattened index   
+            dr = altres[k_n] * 1e3 #altitude range of layer in m
+            temp[fill] = -dr/(A0[i[counter],j[counter]] * (alt_n+RE)/(alt_n[0]+RE))
+            #negative sign due to the sign convention of amplituded and FAC defined by Amm
+
         S[counter,:] = temp
         
     return S
 
+from scipy.interpolate import RectBivariateSpline
+def get_interpolated_amplitudes(m, secs_grid, grid_ev, alts_grid):
+    # instead of using the 
+    m_cf = m[0:m.size//2].reshape((alts_grid.size, 
+                        secs_grid.lat.shape[0],secs_grid.lat.shape[1]))
+    x = secs_grid.eta[:,0]
+    y = secs_grid.xi[0,:]    
+    
+    K = alts_grid.size
+    for k in range(K):
+        f = RectBivariateSpline(x, y, m_cf[k,:,:], kx = 2, ky = 2, s = 0)
+        eval_xi = grid_ev.xi[0,:]
+        eval_eta = grid_ev.eta[:,0]
+        gridded = f(eval_eta, eval_xi)
+
+
+def remove_outside(secs_grid, alts_grid, lat, lon, alt, params=None, ext_factor=-1):
+    # Remove data/evaluation points outside the perimiter of secs nodes
+    use = secs_grid.ingrid(lon.flatten(), lat.flatten(), ext_factor = -1)
+    lat = lat[use]
+    lon = lon[use]
+    alt = alt[use]
+    if params is not None:
+        ps = []
+        for p in range(len(params)):
+            p_ = p[use]
+            ps.append(p_)
+            
+    # Remove data/evaluation points outside grid in vertical direction
+    k0 = get_alt_index(alts_grid, alt, returnfloat=True)
+    inside = (k0 >= 0) & (k0<alts_grid.size-1)
+    lat = lat.flatten()[inside]
+    lon = lon.flatten()[inside]
+    alt = alt.flatten()[inside]
+    
+    if params is not None:
+        pss = []
+        for p in ps:
+            p__ = p[inside]
+            pss.append(p_)
+    
+        return (lat, lon, alt, pss)
+
+    return (lat, lon, alt)            
+    
+
+def prepare_model_data(secs_grid, datadict, alts_grid):
+    jphi = datadict['je'].flatten()
+    jtheta = -datadict['jn'].flatten()
+    jr = datadict['ju'].flatten()
+    use = np.isfinite(jphi)
+    jphi = jphi[use]
+    jtheta = jtheta[use]
+    jr = jr[use]
+    lat = datadict['glatmesh'].flatten()[use]
+    lon = datadict['glonmesh'].flatten()[use]
+    alt = datadict['altmesh'].flatten()[use] 
+    
+    # Remove data/evaluation points outside the perimiter of secs nodes
+    lat, lon, alt, j = remove_outside(secs_grid, alts_grid, lat, lon, alt, 
+                                      params=(jr, jtheta, jphi), ext_factor=-1)
+    
+    d = np.hstack((j[0], jtheta[0], jphi[0]))
+
+    return d, lat, lon, alt
