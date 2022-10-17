@@ -323,9 +323,9 @@ def sample_eiscat(xg, dat, alts_grid):
     el = np.hstack((el1,el2,el3)) #deg
     az = np.hstack((az1,az2,az3)) #deg
 
-    sitelat = 69.38
+    sitelat = 67. #69.38
     sitetheta = 90-sitelat
-    sitephi = 20.30
+    sitephi = 23. #20.30
     O_sph = np.array([RE, 0, 0]) #site location vector
     R = sph2car(sitetheta,sitephi) #sph2ecef rotation matrix cor vector components
     O_ecef = R.dot(O_sph) #Site location vecor in ecef
