@@ -19,6 +19,7 @@ described in this document: https://www.overleaf.com/project/6329caf229ba68180bc
 
 import numpy as np
 from secsy.secsy import utils as secsy
+import secs_3d.gemini_tools
 
 RE = 6371.2 #Earth radius in km
 
@@ -54,9 +55,10 @@ def get_alt_index(alts_grid, alt, returnfloat=False):
     
     if returnfloat:
         use = k != -1
-        res_ = (alt[use] - alts_grid[k[use]])/(2*altres[k[use]])
+        res_ = (alt[use] - edges[k[use]])/(edges[k[use]+1]-edges[k[use]])
+        # res_ = (alt[use] - alts_grid[k[use]])/(2*altres[k[use]])
         k = k.astype(float)
-        k[use] = k[use] + res_
+        k[use] = k[use] - 0.5 + res_
 
     return k    
     
@@ -111,7 +113,7 @@ def get_indices_kij(secs_grid, alts_grid, lat, lon, alt, returnfloat=False):
 
 def get_SECS_J_G_matrices_3D(secs_grid, alts_grid, lat, lon, alt, constant = 
                              1./(4.*np.pi), singularity_limit=None, 
-                             interpolate=False):
+                             interpolate=False, ext_factor=-1):
     ''' 
 
         Calculate SECS J_G matrices for 3D representation using CS grid at fixed
@@ -156,6 +158,10 @@ def get_SECS_J_G_matrices_3D(secs_grid, alts_grid, lat, lon, alt, constant =
         location). Its vertical placement reflect the relative weight of the 
         influence of each layer. S matrix should be constructed with the same
         option.
+    ext_factor : int, optional
+        To control how to filter out locations based on their proximity to the 
+        grid. The default is -1, removing points closer than 1 grid cell from 
+        the edge of the grid (mesh).        
 
     Returns
     -------
@@ -174,7 +180,7 @@ def get_SECS_J_G_matrices_3D(secs_grid, alts_grid, lat, lon, alt, constant =
         singularity_limit=secs_grid.Lres*0.5
         
     # Remove data/evaluation points outside (2D) secs_grid, using the ingrid function
-    use = secs_grid.ingrid(lon.flatten(), lat.flatten())
+    use = secs_grid.ingrid(lon.flatten(), lat.flatten(), ext_factor=ext_factor)
     lat = lat.flatten()[use]
     lon = lon.flatten()[use]
     alt = alt.flatten()[use]
@@ -246,7 +252,6 @@ def get_SECS_J_G_matrices_3D(secs_grid, alts_grid, lat, lon, alt, constant =
         w_over[poss] = k_frac[poss]
 
     #Do the altitude correction
-    altmask = np.zeros(IJK)
     altmask = []
     r_ = (RE + alt_)/(RE + alts_grid) #Altitude correction factors        
     for kkk in range(N):
@@ -285,7 +290,8 @@ def get_SECS_J_G_matrices_3D(secs_grid, alts_grid, lat, lon, alt, constant =
 
 
     
-def get_jr_matrix(secs_grid, alts_grid, lat, lon, alt, interpolate=None):
+def get_jr_matrix(secs_grid, alts_grid, lat, lon, alt, interpolate=None, 
+                  ext_factor=-1):
     """
     Parameters
     ----------
@@ -317,6 +323,10 @@ def get_jr_matrix(secs_grid, alts_grid, lat, lon, alt, interpolate=None):
         node in the construction of S. 2) When making S, the closest
         four grid cells (in each layer) are considered, weighted by their 
         distance to the location in question (n). Default is False.
+    ext_factor : int, optional
+        To control how to filter out locations based on their proximity to the 
+        grid. The default is -1, removing points closer than 1 grid cell from 
+        the edge of the grid (mesh).        
     Returns
     -------
     Tuple of indices (i,j,k). i is index in CS eta direction, j is index in 
@@ -324,7 +334,7 @@ def get_jr_matrix(secs_grid, alts_grid, lat, lon, alt, interpolate=None):
 
     """
     # Remove data/evaluation points outside (2D) secs_grid, using the ingrid function
-    use = secs_grid.ingrid(lon.flatten(), lat.flatten())
+    use = secs_grid.ingrid(lon.flatten(), lat.flatten(), ext_factor=ext_factor)
     lat = lat.flatten()[use]
     lon = lon.flatten()[use]
     alt = alt.flatten()[use]
@@ -368,10 +378,10 @@ def get_jr_matrix(secs_grid, alts_grid, lat, lon, alt, interpolate=None):
                                 np.round(j).astype(int)), (K,I,J)) #flattened index
     
     # Make the vertical integration matrix S. S is very sparse. TO BE IMPLEMENTED
-    S = np.zeros((N, KIJ))
+    S = np.zeros((N, KIJ)) #The final integration matrix
     for (counter,idx) in enumerate(kij): #each evaluation/data point  
         # print(counter)#k[counter], i[counter], j[counter])      
-        temp = np.zeros(KIJ)
+        temp = np.zeros(KIJ) #The part of S corresponding to observation idx
         if interpolate:
             k_n = np.arange(0, np.ceil(k[counter])+1).astype(int)
             if k[counter] % 1 == 0: #add above layer, but set to 0 weight
@@ -385,7 +395,16 @@ def get_jr_matrix(secs_grid, alts_grid, lat, lon, alt, interpolate=None):
                 fill =  np.ravel_multi_index((k_n, i_n, j_n), (K, I, J)) #flattened index   
                 dr = altres[k_n] * 1e3 #altitude range of layer in m
                 temp[fill] = -dr/(A0[i_n,j_n] * (alt_n+RE)/(alt_n[0]+RE))
-                #negative sign due to the sign convention of amplituded and FAC defined by Amm                
+                #negative sign due to the sign convention of amplituded and FAC defined by Amm     
+
+                #Apply the linear interpolation scheme in vertical direction
+                k_frac = k[counter] % 1
+                w_over = k_frac
+                w_under = 1 - w_over
+                under_ = np.take(fill,np.array([ks-2]))
+                over_ = np.take(fill,np.array([ks-1]))
+                temp[under_] = temp[under_] * w_under
+                temp[over_] = temp[over_] * w_over
             else: #Point is in interior             
                 # Identify the four neighboring secs nodes.
                 xi1 = secs_grid.xi[np.floor(i[counter]).astype(int),
@@ -405,22 +424,12 @@ def get_jr_matrix(secs_grid, alts_grid, lat, lon, alt, interpolate=None):
                 eta4 = secs_grid.eta[np.floor(i[counter]).astype(int),
                                    np.ceil(j[counter]).astype(int)]
                 xi_obs, eta_obs = secs_grid.projection.geo2cube(lon[counter], lat[counter])
-                d1 = np.sqrt((xi_obs-xi1)**2 + (eta_obs-eta1)**2)
-                d2 = np.sqrt((xi_obs-xi2)**2 + (eta_obs-eta2)**2)
-                d3 = np.sqrt((xi_obs-xi3)**2 + (eta_obs-eta3)**2)
-                d4 = np.sqrt((xi_obs-xi4)**2 + (eta_obs-eta4)**2)
-                maxd = np.max(np.array([d1,d2,d3,d4]))
-                w1 = maxd/d1
-                w2 = maxd/d2
-                w3 = maxd/d3
-                w4 = maxd/d4
-                wsum = w1+w2+w3+w4
-                w1 = w1/wsum
-                w2 = w2/wsum
-                w3 = w3/wsum
-                w4 = w4/wsum
+                #Bilinear interpolation: https://en.wikipedia.org/wiki/Bilinear_interpolation
+                w1 = (xi4-xi_obs)*(eta2-eta_obs) / ((xi4-xi1)*(eta2-eta1)) #w11
+                w2 = (xi4-xi_obs)*(eta_obs-eta1) / ((xi4-xi1)*(eta2-eta1)) #w12
+                w3 = (xi_obs-xi1)*(eta_obs-eta1) / ((xi4-xi1)*(eta2-eta1)) #w22
+                w4 = (xi_obs-xi1)*(eta2-eta_obs) / ((xi4-xi1)*(eta2-eta1)) #w21
                 wij = np.hstack((np.tile(w1,ks),np.tile(w2,ks),np.tile(w3,ks),np.tile(w4,ks)))
-                
                 #Where to fill in temp array for this observation/evaluation location
                 #Here all layers are treated the same way, just scaled with area
                 k_ns = np.tile(k_n,4) 
@@ -437,12 +446,14 @@ def get_jr_matrix(secs_grid, alts_grid, lat, lon, alt, interpolate=None):
                 temp[fill] = -dr*wij/(A0[i_ns,j_ns] * (np.tile(alt_n,4)+RE)/(alt_n[0]+RE))            
                 #negative sign due to the sign convention of amplituded and FAC defined by Amm
     
-            #Apply the linear interpolation scheme in vertical direction
-            k_frac = k[counter] % 1
-            w_over = k_frac
-            w_under = 1 - w_over
-            temp[fill[-2*4:][0::2]] = temp[fill[-2*4:][0::2]] * w_under
-            temp[fill[-2*4:][1::2]] = temp[fill[-2*4:][1::2]] * w_over           
+                #Apply the linear interpolation scheme in vertical direction
+                k_frac = k[counter] % 1
+                w_over = k_frac
+                w_under = 1 - w_over
+                under_ = np.take(fill,np.array([ks-2, 2*ks-2, 3*ks-2, 4*ks-2]))
+                over_ = np.take(fill,np.array([ks-1, 2*ks-1, 3*ks-1, 4*ks-1]))
+                temp[under_] = temp[under_] * w_under
+                temp[over_] = temp[over_] * w_over          
 
         else:
             k_n = np.arange(0, k[counter]+1)
@@ -571,3 +582,16 @@ def make_P(N):
         P[3*n+1, n+0+N] = 1
         P[3*n+2, n+0+2*N] = 1
     return P
+
+def make_G(grid, alts_grid, lat, lon, alt, interpolate=True, ext_factor=-1):
+    Ge_cf, Gn_cf, Ge_df, Gn_df = get_SECS_J_G_matrices_3D(grid, alts_grid, 
+                    lat, lon, alt, interpolate=interpolate, 
+                    singularity_limit=grid.Lres, ext_factor=ext_factor)
+    S = get_jr_matrix(grid, alts_grid, lat, lon, alt, interpolate=interpolate, 
+                      ext_factor=ext_factor)
+    O = np.zeros(S.shape)
+    Gcf = np.vstack((S, -Gn_cf, Ge_cf))
+    Gdf = np.vstack((O, -Gn_df, Ge_df))
+    G = np.hstack((Gcf, Gdf))
+    
+    return G

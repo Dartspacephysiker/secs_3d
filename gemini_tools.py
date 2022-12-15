@@ -13,13 +13,14 @@ benchmarking the secs3d representation of the current density.
 
 from gemini3d.grid.convert import unitvecs_geographic
 import numpy as np
+import lompe
 from lompe.data_tools.dataloader import getbearing
 import great_circle_calculator.great_circle_calculator as gcc
 import xarray as xr
 from gemini3d.grid.gridmodeldata import model2geogcoords, model2pointsgeogcoords
 import pandas as pd
 from secsy import cubedsphere
-import secs3d
+import secs_3d.secs3d as secs3d
 
 RE = 6371.2 #Earth radius in km
 
@@ -78,7 +79,7 @@ def model_vec2geo_vec(xg, dat, param='v', perp=False):
 
 
 def make_csgrid(xg, height = 500, crop_factor = 0.6, resolution_factor = 0.5, 
-                extend = 1):
+                extend = 1, dlon = 0., dlat = 0.):
     '''
     Put a CubedSphere grid inside GEMINI model domain at specified height
 
@@ -96,7 +97,12 @@ def make_csgrid(xg, height = 500, crop_factor = 0.6, resolution_factor = 0.5,
     extend : int
         How many secs poles to pad with on each side compared to the evaluation 
         grid
-
+    dlon : float
+        How much th shift the centre longitude of grid, in degrees. Default is
+        0
+    dlat : float
+        How much th shift the centre latitude of grid, in degrees. Default is
+        0        
     Returns
     -------
     Tuple containing two CS grid object, first the SECS grid, second is the 
@@ -123,8 +129,8 @@ def make_csgrid(xg, height = 500, crop_factor = 0.6, resolution_factor = 0.5,
                                         np.array([x1[0]]), np.array([x1[1]])))
     
     #Centre location of CS grid
-    position = (xg['glon'][ii,dims[1]//6,dims[2]//2], 
-                xg['glat'][ii,(dims[1]//6),dims[2]//2]) #Added the //6 hack
+    position = (xg['glon'][ii,dims[1]//6,dims[2]//2] + dlon, 
+                xg['glat'][ii,(dims[1]//6),dims[2]//2] + dlat) #Added the //6 hack
 
     #Dimensions of CS grid
     p0 = (xg['glon'][ii,0,dims[2]//2],xg['glat'][ii,0,dims[2]//2])
@@ -266,15 +272,15 @@ def sample_at_alt(xg, dat, grid = None, alt=800, altres=1, time_ind = -1,
             for (ii,aa) in enumerate(alt):
                 galti, gloni, glati, vve = model2geogcoords(xg, dat[v[0]+'e'], 
                             1, round(resfac*dims[2]), round(resfac*dims[1]), wraplon=True, 
-                            altlims=((aa-altres[ii])*1e3, (aa-altres[ii])*1e3), 
+                            altlims=((aa-altres[ii])*1e3, (aa+altres[ii])*1e3), 
                             glatlims=glatlims, glonlims=glonlims)
                 galti, gloni, glati, vvn = model2geogcoords(xg, dat[v[0]+'n'], 
                             1, round(resfac*dims[2]), round(resfac*dims[1]), wraplon=True, 
-                            altlims=((aa-altres[ii])*1e3, (aa-altres[ii])*1e3), 
+                            altlims=((aa-altres[ii])*1e3, (aa+altres[ii])*1e3), 
                             glatlims=glatlims, glonlims=glonlims)          
                 galti, gloni, glati, vvu = model2geogcoords(xg, dat[v[0]+'u'], 
                             1, round(resfac*dims[2]), resfac*dims[1], wraplon=True, 
-                            altlims=((aa-altres[ii])*1e3, (aa-altres[ii])*1e3), 
+                            altlims=((aa-altres[ii])*1e3, (aa+altres[ii])*1e3), 
                             glatlims=glatlims, glonlims=glonlims)            
                 dde.append(vve)
                 ddn.append(vvn)
@@ -286,9 +292,14 @@ def sample_at_alt(xg, dat, grid = None, alt=800, altres=1, time_ind = -1,
         else: #scalar quantity
             dd = []
             for (ii,aa) in enumerate(alt):
+                if v == 'Phitop':
+                    lx1 = xg["lx"][0]
+                    inds1 = range(2, lx1 + 2)
+                    x1 = xg["x1"][inds1]
+                    dat[v] = dat[v].expand_dims(x1=x1)
                 galti, gloni, glati, vvs = model2geogcoords(xg, dat[v], 1, 
                             round(resfac*dims[2]), round(resfac*dims[1]), wraplon=True, 
-                            altlims=((aa-altres[ii])*1e3, (aa-altres[ii])*1e3), 
+                            altlims=((aa-altres[ii])*1e3, (aa+altres[ii])*1e3), 
                             glatlims=glatlims,glonlims=glonlims)                        
                 dd.append(vvs)    
             ddd[v] = np.array(dd)[:,0,:,:]
@@ -309,6 +320,19 @@ def sample_at_alt(xg, dat, grid = None, alt=800, altres=1, time_ind = -1,
         
     return ddd #Append E-field mapped to alt
 
+def sample_points(xg, dat, lat, lon, alt):
+    # Sample GEMINI at input locations
+    je = model2pointsgeogcoords(xg, dat['je'], alt*1e3, lon, lat)
+    jn = model2pointsgeogcoords(xg, dat['jn'], alt*1e3, lon, lat)
+    ju = model2pointsgeogcoords(xg, dat['ju'], alt*1e3, lon, lat)
+    Be = model2pointsgeogcoords(xg, dat['Be'], alt*1e3, lon, lat)
+    Bn = model2pointsgeogcoords(xg, dat['Bn'], alt*1e3, lon, lat)
+    Bu = model2pointsgeogcoords(xg, dat['Bu'], alt*1e3, lon, lat)
+
+    datadict = {'lat':lat.flatten(), 'lon':lon.flatten(), 'alt':alt.flatten(), 
+                'je':je, 'jn':jn, 'ju':ju, 'Be':Be, 'Bn':Bn, 'Bu':Bu}
+    
+    return datadict
 
 def sample_eiscat(xg, dat, alts_grid):
     
@@ -323,7 +347,7 @@ def sample_eiscat(xg, dat, alts_grid):
     el = np.hstack((el1,el2,el3)) #deg
     az = np.hstack((az1,az2,az3)) #deg
 
-    sitelat = 67. #69.38
+    sitelat = 67.35 #69.38
     sitetheta = 90-sitelat
     sitephi = 23. #20.30
     O_sph = np.array([RE, 0, 0]) #site location vector
@@ -534,7 +558,11 @@ def divergence(xg, dat, param = 'j_perp'):
     if param == 'j_perp':
         a1 = np.zeros(dat.J1.values.shape)
         a2 = dat.J2.values
-        a3 = dat.J3.values     
+        a3 = dat.J3.values
+    elif param == 'j':
+        a1 = dat.J1.values
+        a2 = dat.J2.values
+        a3 = dat.J3.values    
       
     else:
         print(param + ' not implemented yet.')
@@ -568,7 +596,7 @@ def divergence(xg, dat, param = 'j_perp'):
 
     return d    
 
-def divergence_spherical(sampledict, param = ['je','jn'], alt = None):
+def divergence_spherical(sampledict, hor=False, alt = None, perp=False):
     """
     
 
@@ -576,10 +604,11 @@ def divergence_spherical(sampledict, param = ['je','jn'], alt = None):
     ----------
     sampledict : dictionary
         Dictoinary containing coordinates and data sampled with sampling 
-        function in this file (spherical components)
-     param : list of STR
-        Which vector field to compute divergence of. Default is je, jh
-        (horizontal current density)
+        function in this file (spherical components). Lat/lon in degrees is 
+        required, and altitude in km. Dictionary also contain EN(U) components 
+        of the vector field which must be named je, jn, (and ju).
+    perp : boolean
+        Whether only horizontal (lon/lat) divergence is computed
     alt : int
         Altitude in km at where divergence is evaluated. Needed when input is 2D.
 
@@ -589,9 +618,19 @@ def divergence_spherical(sampledict, param = ['je','jn'], alt = None):
 
     """
     RE = 6371.2e3 #Earth radius in m
-    ndims = len(param)
-    dims = sampledict['glatmesh'].shape
-    if ndims == 2:
+    
+    if 'shape' in sampledict.keys():
+        dims = sampledict['shape']
+        sampledict['glon'] =sampledict['lon'].reshape(dims)
+        sampledict['glat'] =sampledict['lat'].reshape(dims)
+        sampledict['alt'] =sampledict['alt'].reshape(dims)
+        sampledict['je'] =sampledict['je'].reshape(dims)
+        sampledict['jn'] =sampledict['jn'].reshape(dims)
+        sampledict['ju'] =sampledict['ju'].reshape(dims)
+    else:
+        dims = sampledict['glat'].shape
+    ndims = len(dims)
+    if ndims == 2: #Does not use np.gradient(). Should be implemented.
         if alt is None:
             print('Must specify altitude')
             print(1/0)
@@ -604,7 +643,7 @@ def divergence_spherical(sampledict, param = ['je','jn'], alt = None):
         #Grid differentials
         glons = np.radians(sampledict['glonmesh'])
         glats = np.radians(sampledict['glatmesh'])
-        thetas = 90. - glats
+        thetas = np.pi/2. - glats
         dphi_ = np.diff(glons, axis=0)
         dphi = np.concatenate((dphi_,[dphi_[-1]]))
         dtheta_ = np.diff(thetas, axis=1)
@@ -621,9 +660,73 @@ def divergence_spherical(sampledict, param = ['je','jn'], alt = None):
         d2 = 1./(r*np.sin(thetas)) * (cphi / dphi)
         
         return d1 + d2
+    
+    if ndims == 3:
 
+        r = RE + sampledict['alt']*1e3
 
+        #Vector components
+        jr = sampledict['ju']
+        jtheta = -sampledict['jn']
+        jphi = sampledict['je']
+        
+        # Grid representation
+        rs = RE + sampledict['alt'][:,0,0]*1e3
+        glats = np.radians(sampledict['glat'])
+        thetas = np.pi/2 - glats
+        glons = np.radians(sampledict['glon'])
+        # rs = RE + sampledict['alt'][:,0,0]*1e3
+        # glats = np.radians(sampledict['glat'][0,:,:])
+        # thetas = np.pi/2 - glats
+        # glons = np.radians(sampledict['glon'][0,:,:])
+        
+        # #Alternative way
+        # glats = np.radians(sampledict['glat'])
+        # thetas = np.pi/2 - glats
+        # glons = np.radians(sampledict['glon'])
+        # dphi_ = np.diff(np.radians(sampledict['glon'][0,0,:]))#[0]
+        # dphi = np.concatenate((dphi_,[dphi_[-1]]))
+        # dtheta_ = np.diff(np.radians(90.-sampledict['glat'][0,:,0]))#[0]
+        # dtheta = np.concatenate((dtheta_,[dtheta_[-1]]))
+        # rs = RE + sampledict['alt'][:,0,0]*1e3
+        # dr_ = np.diff(rs)
+        # dr = np.concatenate((dr_,[dr_[-1]]))
 
+        # d0 = (1/r**2) * np.gradient(r**2 * jr, dr, axis=0)
+        # d1 = 1./(r*np.sin(thetas)) * np.gradient(jtheta * np.sin(thetas), dtheta, axis=1)
+        # d2 = 1./(r*np.sin(thetas)) * np.gradient(jphi, dphi, axis=2)
+        
+        #Grid differentials
+        dphi_ = np.diff(glons, axis=1)
+        dphi = np.hstack((dphi_,dphi_[:,-1][:,np.newaxis]))
+        dtheta_ = np.diff(thetas, axis=1)
+        # dtheta = np.vstack((dtheta_,dtheta_[-1,:][np.newaxis,:]))
+        dtheta = np.hstack((dtheta_,dtheta_[:,-1,:][:,np.newaxis,:]))
+        dr_ = np.diff(rs)
+        dr = np.concatenate((dr_,[dr_[-1]]))
+        
+        #vector part differentials
+        cphi_ = np.diff(jphi, axis=2)
+        cphi = np.dstack((cphi_,cphi_[:,:,-1][:,:,np.newaxis]))
+        ctheta_ = np.diff(jtheta*np.sin(thetas), axis=1)
+        ctheta = np.hstack((ctheta_,ctheta_[:,-1,:][:,np.newaxis,:]))
+        cr_ = np.diff(r**2 * jr, axis=0)
+        cr = np.vstack((cr_, cr_[-1,:,:][np.newaxis,:,:]))
+        
+        #Divergence terms
+        d0 = (1./r**2) * (cr / dr[:,np.newaxis, np.newaxis])
+        d1 = 1./(r*np.sin(thetas)) * (ctheta / dtheta)
+        d2 = 1./(r*np.sin(thetas)) * (cphi / dphi)
+        if hor:
+            return d1 + d2
+        else:
+            if perp: # Have a look at this before use!
+                print('Have a look at this before use!')
+                br, btheta, bphi = secs3d.make_b_unitvectors(sampledict['Bu'], 
+                                    -sampledict['Bn'], sampledict['Be'])
+                return br*d0 + btheta*d1 + bphi*d2
+            else: 
+                return d0 + d1 + d2            
 
 
 
@@ -676,7 +779,7 @@ def remove_outside(secs_grid, alts_grid, lat, lon, alt, params=None, ext_factor=
         provided.
     """
     # Remove data/evaluation points outside the perimiter of secs nodes
-    use = secs_grid.ingrid(lon.flatten(), lat.flatten(), ext_factor = -1)
+    use = secs_grid.ingrid(lon.flatten(), lat.flatten(), ext_factor = ext_factor)
     lat = lat[use]
     lon = lon[use]
     alt = alt[use]
@@ -704,7 +807,8 @@ def remove_outside(secs_grid, alts_grid, lat, lon, alt, params=None, ext_factor=
     return (lat, lon, alt)            
     
 
-def prepare_model_data(secs_grid, datadict, alts_grid, jperp=False):
+def prepare_model_data(secs_grid, datadict, alts_grid, jperp=False, 
+                       ext_factor=-1):
     """
     Prepare GEMINI data sampled at spherical shells at different heights to
     input in 3D inversion. Remove nans and data outside the inner grid region,
@@ -724,10 +828,14 @@ def prepare_model_data(secs_grid, datadict, alts_grid, jperp=False):
     jperp : Boolean, optional
         Specifies whether to return the (r, theta, phi) components of the perp
         current. If false(default) the full current is returned (r, theta, phi)
+    ext_factor : int, optional
+        To control how to filter out locations based on their proximity to the 
+        grid. The default is -1, removing points closer than 1 grid cell from 
+        the edge of the grid (mesh).        
 
     Returns
     -------
-    d : list
+    jj : list
         First three elements contain jr,  jtheta and jphi components after 
         filtering. Last three elements will be Br, Btheta and Bphi if this is 
         provided in datadict.
@@ -751,21 +859,24 @@ def prepare_model_data(secs_grid, datadict, alts_grid, jperp=False):
         lon = datadict['glonmesh'].flatten()[use]
         alt = datadict['altmesh'].flatten()[use]
     else:
-        lat = datadict['lat'][use]
-        lon = datadict['lon'][use]
-        alt = datadict['alt'][use]
+        lat = datadict['lat'].flatten()[use]
+        lon = datadict['lon'].flatten()[use]
+        alt = datadict['alt'].flatten()[use]
     
     if "Be" in datadict.keys():
         Br = datadict['Bu'].flatten()[use]
         Btheta = -datadict['Bn'].flatten()[use]
         Bphi = datadict['Be'].flatten()[use]
         params=(jr, jtheta, jphi, Br, Btheta, Bphi)
+        if "fac" in datadict.keys():
+            fac = datadict['fac'].flatten()[use]
+            params = params + (fac,)
     else:
         params=(jr, jtheta, jphi)            
     
     # Remove data/evaluation points outside the perimiter of secs nodes
     jj, lat, lon, alt = remove_outside(secs_grid, alts_grid, lat, lon, alt, 
-                                      params=params, ext_factor=-1)
+                                      params=params, ext_factor=ext_factor)
     
     if jperp:
         br, btheta, bphi = secs3d.make_b_unitvectors(jj[3],jj[4],jj[5])
@@ -777,6 +888,9 @@ def prepare_model_data(secs_grid, datadict, alts_grid, jperp=False):
         jj[0] = j_perp[0:N]
         jj[1] = j_perp[N:2*N]
         jj[2] = j_perp[2*N:3*N]
+        
+        #Alternative way to get jperp, by mapping potential mapping
+        
 
     return jj, lat, lon, alt
 
