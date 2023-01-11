@@ -30,7 +30,6 @@ height = 90 #km. height of secs CS grid at bottom boundary. To be used for SECS 
 RE = 6371.2 #Earth radius in km
 apex = apexpy.Apex(2022)
 interpolate = True #More accurate treatment of observing/evaluation locations
-interpolate_S = True # control the integration matrix separately
 jperp = True #Use only perp components of J as inpur to inversion
 
 #Define CS grid
@@ -41,6 +40,7 @@ grid, grid_ev = gemini_tools.make_csgrid(xg, height=height, crop_factor=0.2, #0.
                                     dlat = -1.) # dlat = 2.0
 singularity_limit=grid.Lres
 alts_grid = np.concatenate((np.arange(90,140,2),np.arange(140,170,5),np.arange(170,230,10),np.arange(230,830,50)))
+# alts_grid = np.array([100,150,200,500])
 altres = np.diff(alts_grid)*0.5
 altres = np.abs(np.concatenate((np.array([altres[0]]),altres)))
 
@@ -67,7 +67,7 @@ else:
     var=["je", "jn", "ju"]
 Nxi = int(J*1.5) #new evaluation resolution: "j" index
 Neta = int(I*1.5) #new evaluation resolution: "i" index
-alts__ = alts_grid[1:]-altres[1:]
+alts__ = alts_grid# alts_grid[1:]-altres[1:]
 etas = np.linspace(grid.eta_mesh[1,0]+0.01*grid.deta,grid.eta_mesh[-2,0]-0.01*grid.deta,Neta)
 xis = np.linspace(grid.xi_mesh[0,1]+0.01*grid.dxi,grid.xi_mesh[0,-2]-0.01*grid.dxi,Nxi)
 xi_ev, eta_ev = np.meshgrid(xis, etas, indexing = 'xy')
@@ -114,7 +114,7 @@ ax.set_title('FAC from GEMINI')
 #Prepare the sampled GEMINI data for inversion
 jj, lat, lon, alt = gemini_tools.prepare_model_data(grid, datadict, alts_grid, jperp=jperp)
 d = np.hstack((jj[0], jj[1], jj[2])) # (r, theta, phi components)
-G = secs3d.make_G(grid, alts_grid, lat, lon, alt)
+G = secs3d.make_G(grid, alts_grid, lat, lon, alt, interpolate=interpolate)
 if jperp:
     br, btheta, bphi = secs3d.make_b_unitvectors(jj[3],jj[4],jj[5])
     B = secs3d.make_B(br, btheta, bphi)    
@@ -133,25 +133,28 @@ if True:
 
 # Investigate resolution matrix
 position = grid.projection.position
-k, i, j = k,i,j = secs3d.get_indices_kij(grid, alts_grid, position[1], position[0], np.array([300]))
+k, i, j = secs3d.get_indices_kij(grid, alts_grid, position[1], position[0], np.array([500]))
 kij = np.ravel_multi_index((k[0],i[0],j[0]), (K,I,J))
-psf = R[:,kij]
+NN=1 # 0 if CF parameters, 1 if DF parameters
+psf = R[:,NN*K*I*J+kij] #psf
+# psf = R[kij,:] # averaging function
 clim = 1e-2
-NN=0 # 0 if CF parameters, 1 if DF parameters
+absolute=True
 
 fig = plt.figure(figsize = (30, 10))
 ax = fig.add_subplot(131, projection='3d')
 ax.set_axis_off()
 visualization.plot_resolution(ax, grid, alts_grid, kij, psf[NN*K*I*J:(NN+1)*K*I*J], clim=clim, 
-                             planes=[0])
+                             planes=[0], absolute=absolute)
 ax = fig.add_subplot(132, projection='3d')
 ax.set_axis_off()
 visualization.plot_resolution(ax, grid, alts_grid, kij, psf[NN*K*I*J:(NN+1)*K*I*J], clim=clim, 
-                             planes=[1], az=4, el=4)
+                             planes=[1], az=40, el=5, absolute=absolute)
 ax = fig.add_subplot(133, projection='3d')
 ax.set_axis_off()
 visualization.plot_resolution(ax, grid, alts_grid, kij, psf[NN*K*I*J:(NN+1)*K*I*J], clim=clim, 
-                             planes=[2])
+                             planes=[2], absolute=absolute)
+
 
 #Solve
 m = lstsq(GTG + Reg, GTd, cond=0.)[0]

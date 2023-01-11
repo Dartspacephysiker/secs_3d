@@ -167,7 +167,7 @@ def get_coastlines(**kwargs):
 
 
 
-def plot_field_aligned_segment(ax, mlon, mlat, alts_grid, color='green'):
+def plot_field_aligned_segment(ax, mlon, mlat, alts_grid, color='green', **kwargs):
     apex = apexpy.Apex(2022)
     xs = []
     ys = []
@@ -179,17 +179,17 @@ def plot_field_aligned_segment(ax, mlon, mlat, alts_grid, color='green'):
         xs.append(x[0])
         ys.append(y[0])
         zs.append(z[0])
-    ax.plot(xs,ys,zs, color=color)    
+    ax.plot(xs,ys,zs, color=color, **kwargs)    
 
-def plot_hor_segment(ax, mlons, mlats, alt, color='green'):
+def plot_hor_segment(ax, mlons, mlats, alt, color='green', **kwargs):
     apex = apexpy.Apex(2022)
     glat_, glon_, e = apex.apex2geo(mlats, mlons, alt)
     x,y,z = sph_to_car((RE+alt, 90-glat_, glon_), deg=True)
-    ax.plot(x,y,z, color=color)
+    ax.plot(x,y,z, color=color, **kwargs)
 
 
 def field_aligned_grid(ax, grid, alts_grid, color='green', showlayers=False, 
-                       showbase=True, fullbox=False):
+                       showbase=True, fullbox=False, verticalcorners=False, **kwargs):
     '''
     Make 3D plot of volume spanned by CS grid following a field line from its
     central location
@@ -272,7 +272,7 @@ def field_aligned_grid(ax, grid, alts_grid, color='green', showlayers=False,
     
     if fullbox:
         #Horizontal boundary
-        plot_hor_segment(ax, mlons0[0,:], mlats0[0,:], alts_grid[-1], color=color)
+        plot_hor_segment(ax, mlons0[0,:], mlats0[0,:], alts_grid[-1], color=color, **kwargs)
         plot_hor_segment(ax, mlons0[-1,:], mlats0[-1,:], alts_grid[-1], color=color)
         plot_hor_segment(ax, mlons0[:,0], mlats0[:,0], alts_grid[-1], color=color)
         plot_hor_segment(ax, mlons0[:,-1], mlats0[:,-1], alts_grid[-1], color=color)
@@ -281,8 +281,25 @@ def field_aligned_grid(ax, grid, alts_grid, color='green', showlayers=False,
         plot_field_aligned_segment(ax, mlons0[0,0], mlats0[0,0], alts_grid, color=color)
         plot_field_aligned_segment(ax, mlons0[0,-1], mlats0[0,-1], alts_grid, color=color)
         plot_field_aligned_segment(ax, mlons0[-1,0], mlats0[-1,0], alts_grid, color=color)
-        plot_field_aligned_segment(ax, mlons0[-1,-1], mlats0[-1,-1], alts_grid, color=color)  
+        plot_field_aligned_segment(ax, mlons0[-1,-1], mlats0[-1,-1], alts_grid, color=color)
+    
+    if verticalcorners:
+        #alts_grid[0] should be the altitude of the base CS grid
+        x0,y0,z0 = sph_to_car((RE+alts_grid[0], 90-grid.lat_mesh[0,0], grid.lon_mesh[0,0]), deg=True)
+        x1,y1,z1 = sph_to_car((RE+alts_grid[-1], 90-grid.lat_mesh[0,0], grid.lon_mesh[0,0]), deg=True)
+        ax.plot([x0[0],x1[0]],[y0[0],y1[0]],[z0[0],z1[0]], color='black', linestyle='dotted')
         
+        x0,y0,z0 = sph_to_car((RE+alts_grid[0], 90-grid.lat_mesh[-1,0], grid.lon_mesh[-1,0]), deg=True)
+        x1,y1,z1 = sph_to_car((RE+alts_grid[-1], 90-grid.lat_mesh[-1,0], grid.lon_mesh[-1,0]), deg=True)
+        ax.plot([x0[0],x1[0]],[y0[0],y1[0]],[z0[0],z1[0]], color='black', linestyle='dotted')
+
+        x0,y0,z0 = sph_to_car((RE+alts_grid[0], 90-grid.lat_mesh[0,-1], grid.lon_mesh[0,-1]), deg=True)
+        x1,y1,z1 = sph_to_car((RE+alts_grid[-1], 90-grid.lat_mesh[0,-1], grid.lon_mesh[0,-1]), deg=True)
+        ax.plot([x0[0],x1[0]],[y0[0],y1[0]],[z0[0],z1[0]], color='black', linestyle='dotted')
+
+        x0,y0,z0 = sph_to_car((RE+alts_grid[0], 90-grid.lat_mesh[-1,-1], grid.lon_mesh[-1,-1]), deg=True)
+        x1,y1,z1 = sph_to_car((RE+alts_grid[-1], 90-grid.lat_mesh[-1,-1], grid.lon_mesh[-1,-1]), deg=True)
+        ax.plot([x0[0],x1[0]],[y0[0],y1[0]],[z0[0],z1[0]], color='black', linestyle='dotted')        
 
 def spherical_grid(ax, lat_ev, lon_ev, alt_ev, color='red'):
 
@@ -314,6 +331,70 @@ def spherical_grid(ax, lat_ev, lon_ev, alt_ev, color='red'):
     x,y,z = sph_to_car((RE+alt_ev[-1,-1,:], 90-lat_ev[-1,-1,:], lon_ev[-1,-1,:]), deg=True)
     ax.plot(x,y,z, color=color)
 
+def plot_e3dfov(ax, lat0, lon0, alt0, lat1, lon1, alt1, color='C1', **kwargs):
+    '''
+    Plot FOV of EISCAT 3D, single site. Plots a line between the outer edges
+    of the FOV at alt0 and alt1, and a vertical line connecting them.
+
+    Parameters
+    ----------
+    ax : matplotlib 3D axis object
+        To plot on
+    lat0 : array-like
+        Latitude of lower altitude boundary.
+    lon0 : array-like
+        Longitude of lower altitude boundary.
+    alt0 : array-like
+        Altitude of lower altitude boundary.
+    lat1 : array-like
+        Latitude of upper altitude boundary.
+    lon1 : array-like
+        Longitude of upper altitude boundary.
+    alt1 : array-like
+        Altitude of upper altitude boundary.
+    color : string, optional
+        Color of line to plot. The default is 'C1'.
+
+    Returns
+    -------
+    None.
+
+    '''
+    NNN = lat0.size
+    for i in range(NNN-1):
+        #Horizontal segmetn, bottom
+        x0,y0,z0 = sph_to_car((RE+alt0[i], 90-lat0[i], lon0[i]), deg=True)
+        x1,y1,z1 = sph_to_car((RE+alt0[i+1], 90-lat0[i+1], lon0[i+1]), deg=True)
+        ax.plot([x0[0],x1[0]],[y0[0],y1[0]],[z0[0],z1[0]], color=color)
+        
+        #Horizontal segmetn, top
+        x0,y0,z0 = sph_to_car((RE+alt1[i], 90-lat1[i], lon1[i]), deg=True)
+        x1,y1,z1 = sph_to_car((RE+alt1[i+1], 90-lat1[i+1], lon1[i+1]), deg=True)
+        ax.plot([x0[0],x1[0]],[y0[0],y1[0]],[z0[0],z1[0]], color=color)
+
+        #Vertical segment
+        x0,y0,z0 = sph_to_car((RE+alt0[i], 90-lat0[i], lon0[i]), deg=True)
+        x1,y1,z1 = sph_to_car((RE+alt1[i], 90-lat1[i], lon1[i]), deg=True)
+        ax.plot([x0[0],x1[0]],[y0[0],y1[0]],[z0[0],z1[0]], color=color, alpha=0.3)
+
+    #Connecting last beam to fist beam
+    #Horizontal segmetn, bottom
+    x0,y0,z0 = sph_to_car((RE+alt0[NNN-1], 90-lat0[NNN-1], lon0[NNN-1]), deg=True)
+    x1,y1,z1 = sph_to_car((RE+alt0[0], 90-lat0[0], lon0[0]), deg=True)
+    ax.plot([x0[0],x1[0]],[y0[0],y1[0]],[z0[0],z1[0]], color=color)
+
+    #Horizontal segmetn, top
+    x0,y0,z0 = sph_to_car((RE+alt1[NNN-1], 90-lat1[NNN-1], lon1[NNN-1]), deg=True)
+    x1,y1,z1 = sph_to_car((RE+alt1[0], 90-lat1[0], lon1[0]), deg=True)
+    ax.plot([x0[0],x1[0]],[y0[0],y1[0]],[z0[0],z1[0]], color=color)
+    
+    #Vertical segment
+    x0,y0,z0 = sph_to_car((RE+alt0[NNN-1], 90-lat0[NNN-1], lon0[NNN-1]), deg=True)
+    x1,y1,z1 = sph_to_car((RE+alt1[NNN-1], 90-lat1[NNN-1], lon1[NNN-1]), deg=True)
+    ax.plot([x0[0],x1[0]],[y0[0],y1[0]],[z0[0],z1[0]], color=color, alpha=0.3, **kwargs)
+
+                
+
 def plot_field_line(ax, lat0, lon0, alts_grid, color='grey', dipole=False, **kwargs):
     if dipole:
         from gemini3d.grid import convert
@@ -340,7 +421,7 @@ def plot_field_line(ax, lat0, lon0, alts_grid, color='grey', dipole=False, **kwa
 
 
 def plot_resolution(ax, grid, alts_grid, kij, psf, az=-26, el=7, clim=1e-6, 
-                   planes=[0,1], dipole=True, alpha=0.5):
+                   planes=[0,1], dipole=True, alpha=0.5, absolute=False):
     '''
 
     Parameters
@@ -370,44 +451,74 @@ def plot_resolution(ax, grid, alts_grid, kij, psf, az=-26, el=7, clim=1e-6,
     ax.view_init(azim=az, elev=el)
     field_aligned_grid(ax, grid, alts_grid, color='green')
     kwargs={'linewidth':3}
+
+    if absolute:
+        cmap = plt.cm.viridis
+        norm = matplotlib.colors.Normalize(vmin=0, vmax=clim)
+        psf = np.abs(psf)
+    else:
+        cmap = plt.cm.seismic
+        norm = matplotlib.colors.Normalize(vmin=-clim, vmax=clim)
+        
     # for kk in range(lat_ev[0,-1,:].size):
     #     visualization.plot_field_line(ax, lat_ev[0,-1,kk], lon_ev[0,-1,kk], 
     #                               alts__, color='orange', **kwargs, dipole=True)
     #     visualization.plot_field_line(ax, lat_ev[0,sh[1]//2,kk], lon_ev[0,sh[1]//2,kk], 
     #                               alts__, color='orange', **kwargs, dipole=True)
-    xis = grid.xi[0,:]
-    etas = grid.eta[:,0]
-    xi_, eta_ = np.meshgrid(xis, etas, indexing = 'xy')
-    alt_, eta_, xi_ = np.meshgrid(alts_grid, etas, xis, indexing='ij')
-    alt_, etas_, xis_ = np.meshgrid(alts_grid, etas, xis, indexing='ij')
-    lon_, lat_ = grid.projection.cube2geo(xis_, etas_)
-    sh = lon_.shape
-    x, y, z = sph_to_car((RE+alt_.flatten(), 90-lat_.flatten(), 
-                          lon_.flatten()), deg=True)
-    cmap = plt.cm.seismic
-    norm = matplotlib.colors.Normalize(vmin=-clim, vmax=clim)
-    if 0 in planes:
-        p = ax.plot_surface(x.reshape(sh)[k,:,:], y.reshape(sh)[k,:,:], 
-                            z.reshape(sh)[k,:,:], alpha=alpha, zorder=1,
-                            facecolors=cmap(norm(psf.reshape(sh)[k,:,:])), cmap=cmap)
-    if 1 in planes:
-        p = ax.plot_surface(x.reshape(sh)[:,i,:], y.reshape(sh)[:,i,:], 
-                            z.reshape(sh)[:,i,:], alpha=alpha, zorder=3,
-                            facecolors=cmap(norm(psf.reshape(sh)[:,i,:])), cmap=cmap)
-    if 2 in planes:
-        p = ax.plot_surface(x.reshape(sh)[:,:,j], y.reshape(sh)[:,:,j], 
-                        z.reshape(sh)[:,:,j], alpha=alpha, zorder=2,
-                        facecolors=cmap(norm(psf.reshape(sh)[:,:,j])), cmap=cmap)    
-    ax.scatter(x[kij], y[kij], z[kij], s=50, marker='*', color='green')
+
+    altres = np.diff(alts_grid)*0.5
+    altres = np.abs(np.concatenate((np.array([altres[0]]),altres)))
     
-    #Field lines
-    for kk in range(lat_[0,-1,:].size):     
-        plot_field_line(ax, lat_[0,-1,kk], lon_[0,-1,kk], 
-                                  alts_grid, color='orange', **kwargs, dipole=dipole)
+    for pp in planes:
+        if pp == 0:
+            xis = grid.xi_mesh[0,:]# + grid.dxi*0.5
+            etas = grid.eta_mesh[:,0]# + grid.deta*0.5
+            alt_, etas_, xis_ = np.meshgrid(alts_grid+altres, etas, xis, indexing='ij')
+            lon_, lat_ = grid.projection.cube2geo(xis_, etas_)
+            sh = lon_.shape
+            x, y, z = sph_to_car((RE+alt_.flatten(), 90-lat_.flatten(), 
+                                  lon_.flatten()), deg=True)
+            p = ax.plot_surface(x.reshape(sh)[k,:,:], y.reshape(sh)[k,:,:], 
+                                z.reshape(sh)[k,:,:], alpha=alpha, zorder=1,
+                                facecolors=cmap(norm(psf.reshape(sh[0],sh[1]-1,sh[2]-1)[k,:,:])), cmap=cmap)
+    
+        if pp == 1:
+            xis = grid.xi_mesh[0,:]# + grid.dxi*0.5
+            etas = grid.eta_mesh[:,0] + grid.deta*0.5
+            alt_, etas_, xis_ = np.meshgrid(alts_grid, etas, xis, indexing='ij')
+            lon_, lat_ = grid.projection.cube2geo(xis_, etas_)
+            sh = lon_.shape
+            x, y, z = sph_to_car((RE+alt_.flatten(), 90-lat_.flatten(), 
+                                  lon_.flatten()), deg=True)        
+            p = ax.plot_surface(x.reshape(sh)[:,i,:], y.reshape(sh)[:,i,:], 
+                                z.reshape(sh)[:,i,:], alpha=alpha, zorder=3,
+                                facecolors=cmap(norm(psf.reshape(sh[0],sh[1]-1,sh[2]-1)[:,i,:])), cmap=cmap)
+    
+        if pp == 2:
+            xis = grid.xi_mesh[0,:] + grid.dxi*0.5
+            etas = grid.eta_mesh[:,0]# + grid.deta*0.5
+            alt_, etas_, xis_ = np.meshgrid(alts_grid, etas, xis, indexing='ij')
+            lon_, lat_ = grid.projection.cube2geo(xis_, etas_)
+            sh = lon_.shape
+            x, y, z = sph_to_car((RE+alt_.flatten(), 90-lat_.flatten(), 
+                                  lon_.flatten()), deg=True)
+            p = ax.plot_surface(x.reshape(sh)[:,:,j], y.reshape(sh)[:,:,j], 
+                            z.reshape(sh)[:,:,j], alpha=alpha, zorder=2,
+                            facecolors=cmap(norm(psf.reshape(sh[0],sh[1]-1,sh[2]-1)[:,:,j])), cmap=cmap) 
+        alt0 = alts_grid[k]+altres[k]
+        lon0 = grid.lon[i,j]
+        lat0 = grid.lat[i,j]
+        x0, y0, z0 = sph_to_car((RE+alt0, 90-lat0, lon0), deg=True)
+        ax.scatter(x0, y0, z0, s=50, marker='*', color='green')
         
-    x0, y0, z0 = sph_to_car((RE+0, 90-grid.projection.position[1], grid.projection.position[0]), deg=True)
-    range_ =  alts_grid[-1]*0.3
-    ax.set_xlim(x0-range_, x0+range_)
-    ax.set_ylim(y0-range_, y0+range_)
-    ax.set_zlim(z0, z0+2*range_)
-    ax.set_title('PSF at k='+str(k)+', i='+str(i)+', j='+str(j))
+        #Field lines
+        for kk in range(lat_[0,-1,:].size):     
+            plot_field_line(ax, lat_[0,-1,kk], lon_[0,-1,kk], 
+                                      alts_grid, color='orange', **kwargs, dipole=dipole)
+            
+        x0, y0, z0 = sph_to_car((RE+0, 90-grid.projection.position[1], grid.projection.position[0]), deg=True)
+        range_ =  alts_grid[-1]*0.3
+        ax.set_xlim(x0-range_, x0+range_)
+        ax.set_ylim(y0-range_, y0+range_)
+        ax.set_zlim(z0, z0+2*range_)
+        ax.set_title('PSF at k='+str(k)+', i='+str(i)+', j='+str(j))

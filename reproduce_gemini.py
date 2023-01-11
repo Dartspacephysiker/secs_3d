@@ -68,8 +68,8 @@ else:
 # datadict = gemini_tools.sample_at_alt(xg, dat, alt=alts_grid, altres=altres, 
 #                                   var=var, resfac=0.25)
 # datadict = gemini_tools.sample_eiscat(xg, dat, alts_grid_obs)
-Nxi = 6 #new evaluation resolution: "j" index
-Neta = 8 #new evaluation resolution: "i" index
+Nxi = 18#6 #new evaluation resolution: "j" index
+Neta = 24#8 #new evaluation resolution: "i" index
 alts__ = alts_grid[1:]-altres[1:]
 etas = np.linspace(grid.eta_mesh[1,0]+0.01*grid.deta,grid.eta_mesh[-2,0]-0.01*grid.deta,Neta)
 xis = np.linspace(grid.xi_mesh[0,1]+0.01*grid.dxi,grid.xi_mesh[0,-2]-0.01*grid.dxi,Nxi)
@@ -199,7 +199,7 @@ for alt_i in range(sh[0]-1):
     #                 vmin=vmin/10, vmax=vmax/10)
     values = model_param[alt_i,:,:]
     d3 = {'xi':grid.xi, 'eta':grid.eta, 'values':djr, 
-          'title':'3D SECS: $10 \cdot \Delta j_r$ @ '+str(alts_grid[alt_i])+' km', 
+          'title':'3D SECS: $10 \cdot \Delta j_u$ @ '+str(alts_grid[alt_i])+' km', 
           'glat':grid.lat, 'glon':grid.lon, 'alt':alts_grid[alt_i], 
           'xirange':(grid.xi_min,grid.xi_max), 'etarange':(grid.eta_min,grid.eta_max), 
           'plotgrid':grid, 'filename':filename}

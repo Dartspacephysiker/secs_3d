@@ -338,14 +338,19 @@ def sample_eiscat(xg, dat, alts_grid):
     
     #Implement 27 beam (monostatic config) configuration as sketched by Ogawa (2021)
     
-    el1 = np.array([64,61,60,58,57,55,54,54,57,59,61,61])
-    az1 = np.array([0,35,69,101,130,156,180,204,231,258,288,323])
-    el2 = np.array([30,30,30,30,30,30,30,30,30,30,30,30])
-    az2 = np.array([0,30,60,90,120,150,180,210,240,270,300,330])
-    el3 = np.array([66,77.8,90])
-    az3 = np.array([180,180,180])
-    el = np.hstack((el1,el2,el3)) #deg
-    az = np.hstack((az1,az2,az3)) #deg
+    # el1 = np.array([64,61,60,58,57,55,54,54,57,59,61,61])
+    # az1 = np.array([0,35,69,101,130,156,180,204,231,258,288,323])
+    # el2 = np.array([30,30,30,30,30,30,30,30,30,30,30,30])
+    # az2 = np.array([0,30,60,90,120,150,180,210,240,270,300,330])
+    # el3 = np.array([66,77.8,90])
+    # az3 = np.array([180,180,180])
+    # el = np.hstack((el1,el2,el3)) #deg
+    # az = np.hstack((az1,az2,az3)) #deg
+    NN = 100
+    el = np.ones(NN) * 30
+    az = np.linspace(0,360,NN)
+    # el = np.array([30,30,30,30,30,30,30,30])
+    # az = np.array([0,45,90,135,180,225,270,315])
 
     sitelat = 67.35 #69.38
     sitetheta = 90-sitelat
