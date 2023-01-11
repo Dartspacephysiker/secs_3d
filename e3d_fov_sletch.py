@@ -27,22 +27,12 @@ RE = 6371.2 #Earth radius in km
 apex = apexpy.Apex(2022)
 jperp = True #Use only perp components of J as inpur to inversion
 
-#Define CS grid
+#Define CS grid. Note: Not defined with respect to a TX site on ground
 xg = read.grid(path)
 extend=1
 grid, grid_ev = gemini_tools.make_csgrid(xg, height=height, crop_factor=0.2, #0.45
                                     resolution_factor=0.3, extend=extend, 
                                     dlat = 0.) # dlat = 2.0
-singularity_limit=grid.Lres
-alts_grid = np.concatenate((np.arange(height,140,2),np.arange(140,170,5),np.arange(170,230,10),np.arange(230,830,50)))
-# alts_grid = np.array([100,150,200,500])
-altres = np.diff(alts_grid)*0.5
-altres = np.abs(np.concatenate((np.array([altres[0]]),altres)))
-
-#Grid dimensions
-K = alts_grid.shape[0] #Number of vertival layers
-I = grid.shape[0] #Number of cells in eta direction
-J = grid.shape[1]  #Number of cells in xi direction 
 
 #Open simulation output files
 var = ["v1", "v2", "v3", "Phi", "J1", "J2", "J3", "ne"]
@@ -54,15 +44,9 @@ t = times[0]
 dat = read.frame(path, t, var=var)
 dat = gemini_tools.compute_enu_components(xg, dat)
 
-# Location of EISCAT
-sitelat = 67.35 #69.38
-sitetheta = 90-sitelat
-sitephi = 23. #20.30
-
-####
 #Sample EISCAT at some specific beams
 alts_grid = np.array([100,300])
-datadict = gemini_tools.sample_eiscat(xg, dat, alts_grid)
+datadict = gemini_tools.sample_eiscat(xg, dat, alts_grid) #"Beams" are hardcoded here for now
 lat0 = datadict['lat'][::2]
 lon0 = datadict['lon'][::2]
 alt0 = datadict['alt'][::2]
@@ -79,7 +63,6 @@ ax = fig.add_subplot(111, projection='3d')
 ax.set_axis_off()
 ax.view_init(azim=az, elev=el)
 kwargs={'label':'Field-aligned grid'}
-# kwargs = {}
 visualization.field_aligned_grid(ax, grid, alts_grid, color='green', 
                     fullbox=True, verticalcorners=True, **kwargs)
 kwargs={'label':'30$^\circ$ elevation'}
